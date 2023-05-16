@@ -75,6 +75,10 @@ func (tree *MutableTree) VersionExists(version int64) bool {
 	tree.mtx.Lock()
 	defer tree.mtx.Unlock()
 
+	fmt.Printf("VersionExists: version = %+v\n", version)
+	fmt.Printf("VersionExists: tree.versions = %+v\n", tree.versions)
+	fmt.Printf("VersionExists: tree.allRootLoaded = %+v\n", tree.allRootLoaded)
+
 	if tree.allRootLoaded {
 		return tree.versions[version]
 	}
