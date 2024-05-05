@@ -27,7 +27,10 @@ type Importer struct {
 	batch     db.Batch
 	batchSize uint32
 	stack     []*Node
-	nonces    []int32
+	nonces    []uint32
+
+	// inflightCommit tracks a batch commit, if any.
+	inflightCommit <-chan error
 }
 
 // newImporter creates a new Importer for an empty MutableTree.
@@ -50,15 +53,13 @@ func newImporter(tree *MutableTree, version int64) (*Importer, error) {
 		version: version,
 		batch:   tree.ndb.db.NewBatch(),
 		stack:   make([]*Node, 0, 8),
-		nonces:  make([]int32, version+1),
+		nonces:  make([]uint32, version+1),
 	}, nil
 }
 
 // writeNode writes the node content to the storage.
 func (i *Importer) writeNode(node *Node) error {
-	if _, err := node._hash(node.nodeKey.version); err != nil {
-		return err
-	}
+	node._hash(node.nodeKey.version)
 	if err := node.validate(); err != nil {
 		return err
 	}
@@ -74,16 +75,27 @@ func (i *Importer) writeNode(node *Node) error {
 	bytesCopy := make([]byte, buf.Len())
 	copy(bytesCopy, buf.Bytes())
 
-	if err := i.batch.Set(i.tree.ndb.nodeKey(node.nodeKey), bytesCopy); err != nil {
+	if err := i.batch.Set(i.tree.ndb.nodeKey(node.GetKey()), bytesCopy); err != nil {
 		return err
 	}
 
 	i.batchSize++
 	if i.batchSize >= maxBatchSize {
-		if err := i.batch.Write(); err != nil {
+		// Wait for previous batch.
+		var err error
+		if i.inflightCommit != nil {
+			err = <-i.inflightCommit
+			i.inflightCommit = nil
+		}
+		if err != nil {
 			return err
 		}
-		i.batch.Close()
+		result := make(chan error)
+		i.inflightCommit = result
+		go func(batch db.Batch) {
+			defer batch.Close()
+			result <- batch.Write()
+		}(i.batch)
 		i.batch = i.tree.ndb.db.NewBatch()
 		i.batchSize = 0
 	}
@@ -94,6 +106,10 @@ func (i *Importer) writeNode(node *Node) error {
 // Close frees all resources. It is safe to call multiple times. Uncommitted nodes may already have
 // been flushed to the database, but will not be visible.
 func (i *Importer) Close() {
+	if i.inflightCommit != nil {
+		<-i.inflightCommit
+		i.inflightCommit = nil
+	}
 	if i.batch != nil {
 		i.batch.Close()
 	}
@@ -133,19 +149,29 @@ func (i *Importer) Add(exportNode *ExportNode) error {
 	if node.subtreeHeight == 0 {
 		node.size = 1
 	} else if stackSize >= 2 && i.stack[stackSize-1].subtreeHeight < node.subtreeHeight && i.stack[stackSize-2].subtreeHeight < node.subtreeHeight {
-		node.leftNode = i.stack[stackSize-2]
-		node.rightNode = i.stack[stackSize-1]
-		node.leftNodeKey = node.leftNode.nodeKey
-		node.rightNodeKey = node.rightNode.nodeKey
-		node.size = node.leftNode.size + node.rightNode.size
+		leftNode := i.stack[stackSize-2]
+		rightNode := i.stack[stackSize-1]
+
+		node.leftNode = leftNode
+		node.rightNode = rightNode
+		node.leftNodeKey = leftNode.GetKey()
+		node.rightNodeKey = rightNode.GetKey()
+		node.size = leftNode.size + rightNode.size
+
 		// Update the stack now.
-		if err := i.writeNode(i.stack[stackSize-2]); err != nil {
+		if err := i.writeNode(leftNode); err != nil {
 			return err
 		}
-		if err := i.writeNode(i.stack[stackSize-1]); err != nil {
+		if err := i.writeNode(rightNode); err != nil {
 			return err
 		}
 		i.stack = i.stack[:stackSize-2]
+
+		// remove the recursive references to avoid memory leak
+		leftNode.leftNode = nil
+		leftNode.rightNode = nil
+		rightNode.leftNode = nil
+		rightNode.rightNode = nil
 	}
 	i.nonces[exportNode.Version]++
 	node.nodeKey = &NodeKey{
@@ -169,7 +195,7 @@ func (i *Importer) Commit() error {
 
 	switch len(i.stack) {
 	case 0:
-		if err := i.batch.Set(i.tree.ndb.nodeKey(&NodeKey{version: i.version, nonce: 1}), []byte{}); err != nil {
+		if err := i.batch.Set(i.tree.ndb.nodeKey(GetRootKey(i.version)), []byte{}); err != nil {
 			return err
 		}
 	case 1:
@@ -178,7 +204,7 @@ func (i *Importer) Commit() error {
 			return err
 		}
 		if i.stack[0].nodeKey.version < i.version { // it means there is no update in the given version
-			if err := i.batch.Set(i.tree.ndb.nodeKey(&NodeKey{version: i.version, nonce: 1}), i.tree.ndb.nodeKey(i.stack[0].nodeKey)); err != nil {
+			if err := i.batch.Set(i.tree.ndb.nodeKey(GetRootKey(i.version)), i.tree.ndb.nodeKeyPrefix(i.stack[0].nodeKey.version)); err != nil {
 				return err
 			}
 		}

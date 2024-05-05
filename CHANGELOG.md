@@ -2,24 +2,37 @@
 
 ## Unreleased
 
+## v1.0.1 February 16, 2024
+
 ### Improvements
 
+- [#876](https://github.com/cosmos/iavl/pull/876) Make pruning of legacy orphan nodes asynchronous.
+
+## v1.0.0 (October 30, 2023)
+
+### Improvements
+
+- [#695](https://github.com/cosmos/iavl/pull/695) Add API `SaveChangeSet` to save the changeset as a new version.
 - [#703](https://github.com/cosmos/iavl/pull/703) New APIs `NewCompressExporter`/`NewCompressImporter` to support more compact snapshot format.
 - [#729](https://github.com/cosmos/iavl/pull/729) Speedup Genesis writes for IAVL, by writing in small batches.
 - [#726](https://github.com/cosmos/iavl/pull/726) Make `KVPair` and `ChangeSet` serializable with protobuf.
 - [#718](https://github.com/cosmos/iavl/pull/718) Fix `traverseNodes` unexpected behaviour
 - [#770](https://github.com/cosmos/iavl/pull/770) Add `WorkingVersion()int64` API.
 
+### Bug Fixes
+
+- [#773](https://github.com/cosmos/iavl/pull/773) Fix memory leak in `Import`.
+- [#801](https://github.com/cosmos/iavl/pull/801) Fix rootKey empty check by len equals 0.
+- [#805](https://github.com/cosmos/iavl/pull/805) Use `sync.Map` instead of map to prevent concurrent writes at the fast node level
+
 ### Breaking Changes
 
 - [#735](https://github.com/cosmos/iavl/pull/735) Pass logger to `NodeDB`, `MutableTree` and `ImmutableTree`
-
 - [#646](https://github.com/cosmos/iavl/pull/646) Remove the `orphans` from the storage
-
-### API Changes
-
+- [#777](https://github.com/cosmos/iavl/pull/777) Don't return errors from ImmutableTree.Hash, NewImmutableTree
+- [#815](https://github.com/cosmos/iavl/pull/815) `NewMutableTreeWithOpts` was removed in favour of accepting options via a variadic in `NewMutableTree`
+- [#815](https://github.com/cosmos/iavl/pull/815) `NewImmutableTreeWithOpts` is removed in favour of accepting options via a variadic in `NewImmutableTree`
 - [#646](https://github.com/cosmos/iavl/pull/646) Remove the `DeleteVersion`, `DeleteVersions`, `DeleteVersionsRange` and introduce a new endpoint of `DeleteVersionsTo` instead
-- [#695](https://github.com/cosmos/iavl/pull/695) Add API `SaveChangeSet` to save the changeset as a new version.
 
 ## 0.20.0 (March 14, 2023)
 

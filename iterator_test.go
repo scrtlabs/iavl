@@ -3,11 +3,11 @@ package iavl
 import (
 	"math/rand"
 	"sort"
+	"sync"
 	"testing"
 
 	log "cosmossdk.io/log"
 	dbm "github.com/cosmos/cosmos-db"
-	"github.com/cosmos/iavl/fastnode"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,7 +37,7 @@ func TestIterator_NewIterator_NilTree_Failure(t *testing.T) {
 	})
 
 	t.Run("Unsaved Fast Iterator", func(t *testing.T) {
-		itr := NewUnsavedFastIterator(start, end, ascending, nil, map[string]*fastnode.Node{}, map[string]interface{}{})
+		itr := NewUnsavedFastIterator(start, end, ascending, nil, &sync.Map{}, &sync.Map{})
 		performTest(t, itr)
 		require.ErrorIs(t, errFastIteratorNilNdbGiven, itr.Error())
 	})
@@ -57,16 +57,14 @@ func TestUnsavedFastIterator_NewIterator_NilAdditions_Failure(t *testing.T) {
 	}
 
 	t.Run("Nil additions given", func(t *testing.T) {
-		tree, err := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
-		require.NoError(t, err)
+		tree := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
 		itr := NewUnsavedFastIterator(start, end, ascending, tree.ndb, nil, tree.unsavedFastNodeRemovals)
 		performTest(t, itr)
 		require.ErrorIs(t, errUnsavedFastIteratorNilAdditionsGiven, itr.Error())
 	})
 
 	t.Run("Nil removals given", func(t *testing.T) {
-		tree, err := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
-		require.NoError(t, err)
+		tree := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
 		itr := NewUnsavedFastIterator(start, end, ascending, tree.ndb, tree.unsavedFastNodeAdditions, nil)
 		performTest(t, itr)
 		require.ErrorIs(t, errUnsavedFastIteratorNilRemovalsGiven, itr.Error())
@@ -79,8 +77,7 @@ func TestUnsavedFastIterator_NewIterator_NilAdditions_Failure(t *testing.T) {
 	})
 
 	t.Run("Additions and removals are nil", func(t *testing.T) {
-		tree, err := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
-		require.NoError(t, err)
+		tree := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
 		itr := NewUnsavedFastIterator(start, end, ascending, tree.ndb, nil, nil)
 		performTest(t, itr)
 		require.ErrorIs(t, errUnsavedFastIteratorNilAdditionsGiven, itr.Error())
@@ -249,11 +246,10 @@ func iteratorSuccessTest(t *testing.T, config *iteratorTestConfig) {
 }
 
 func setupIteratorAndMirror(t *testing.T, config *iteratorTestConfig) (dbm.Iterator, [][]string) {
-	tree, err := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
-	require.NoError(t, err)
+	tree := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
 
 	mirror := setupMirrorForIterator(t, config, tree)
-	_, _, err = tree.SaveVersion()
+	_, _, err := tree.SaveVersion()
 	require.NoError(t, err)
 
 	latestVersion, err := tree.ndb.getLatestVersion()
@@ -266,11 +262,10 @@ func setupIteratorAndMirror(t *testing.T, config *iteratorTestConfig) (dbm.Itera
 }
 
 func setupFastIteratorAndMirror(t *testing.T, config *iteratorTestConfig) (dbm.Iterator, [][]string) {
-	tree, err := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
-	require.NoError(t, err)
+	tree := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
 
 	mirror := setupMirrorForIterator(t, config, tree)
-	_, _, err = tree.SaveVersion()
+	_, _, err := tree.SaveVersion()
 	require.NoError(t, err)
 
 	itr := NewFastIterator(config.startIterate, config.endIterate, config.ascending, tree.ndb)
@@ -278,8 +273,7 @@ func setupFastIteratorAndMirror(t *testing.T, config *iteratorTestConfig) (dbm.I
 }
 
 func setupUnsavedFastIterator(t *testing.T, config *iteratorTestConfig) (dbm.Iterator, [][]string) {
-	tree, err := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
-	require.NoError(t, err)
+	tree := NewMutableTree(dbm.NewMemDB(), 0, false, log.NewNopLogger())
 
 	// For unsaved fast iterator, we would like to test the state where
 	// there are saved fast nodes as well as some unsaved additions and removals.
@@ -294,18 +288,18 @@ func setupUnsavedFastIterator(t *testing.T, config *iteratorTestConfig) (dbm.Ite
 
 	// First half of the mirror
 	mirror := setupMirrorForIterator(t, &firstHalfConfig, tree)
-	_, _, err = tree.SaveVersion()
+	_, _, err := tree.SaveVersion()
 	require.NoError(t, err)
 
 	// No unsaved additions or removals should be present after saving
-	require.Equal(t, 0, len(tree.unsavedFastNodeAdditions))
-	require.Equal(t, 0, len(tree.unsavedFastNodeRemovals))
+	require.Equal(t, 0, syncMapCount(tree.unsavedFastNodeAdditions))
+	require.Equal(t, 0, syncMapCount(tree.unsavedFastNodeRemovals))
 
 	// Ensure that there are unsaved additions and removals present
 	secondHalfMirror := setupMirrorForIterator(t, &secondHalfConfig, tree)
 
-	require.True(t, len(tree.unsavedFastNodeAdditions) >= len(secondHalfMirror))
-	require.Equal(t, 0, len(tree.unsavedFastNodeRemovals))
+	require.True(t, syncMapCount(tree.unsavedFastNodeAdditions) >= len(secondHalfMirror))
+	require.Equal(t, 0, syncMapCount(tree.unsavedFastNodeRemovals))
 
 	// Merge the two halves
 	if config.ascending {
@@ -344,7 +338,7 @@ func TestNodeIterator_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	// check if the iterating count is same with the entire node count of the tree
-	itr, err := NewNodeIterator(tree.root.nodeKey, tree.ndb)
+	itr, err := NewNodeIterator(tree.root.GetKey(), tree.ndb)
 	require.NoError(t, err)
 	nodeCount := 0
 	for ; itr.Valid(); itr.Next(false) {
@@ -353,7 +347,7 @@ func TestNodeIterator_Success(t *testing.T) {
 	require.Equal(t, int64(nodeCount), tree.Size()*2-1)
 
 	// check if the skipped node count is right
-	itr, err = NewNodeIterator(tree.root.nodeKey, tree.ndb)
+	itr, err = NewNodeIterator(tree.root.GetKey(), tree.ndb)
 	require.NoError(t, err)
 	updateCount := 0
 	skipCount := 0
@@ -369,7 +363,20 @@ func TestNodeIterator_Success(t *testing.T) {
 }
 
 func TestNodeIterator_WithEmptyRoot(t *testing.T) {
-	itr, err := NewNodeIterator(nil, newNodeDB(dbm.NewMemDB(), 0, nil, log.NewNopLogger()))
+	itr, err := NewNodeIterator(nil, newNodeDB(dbm.NewMemDB(), 0, DefaultOptions(), log.NewNopLogger()))
 	require.NoError(t, err)
 	require.False(t, itr.Valid())
+
+	itr, err = NewNodeIterator([]byte{}, newNodeDB(dbm.NewMemDB(), 0, DefaultOptions(), log.NewNopLogger()))
+	require.NoError(t, err)
+	require.False(t, itr.Valid())
+}
+
+func syncMapCount(m *sync.Map) int {
+	count := 0
+	m.Range(func(_, _ interface{}) bool {
+		count++
+		return true
+	})
+	return count
 }
