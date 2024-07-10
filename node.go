@@ -285,7 +285,8 @@ func (node *Node) String() string {
 	if node.rightNode != nil && node.rightNode.nodeKey != nil {
 		child += fmt.Sprintf("{right %v}", node.rightNode.nodeKey)
 	}
-	return fmt.Sprintf("Node{%s:%s@ %v:%x-%x %d-%d %x}#%s\n",
+	// scrt-FIX: use #v on nil values to avoid panic
+	return fmt.Sprintf("Node{%s:%s@ %#v:%#x-%#x %d-%d %x}#%s\n",
 		color.ColoredBytes(node.key, color.Green, color.Blue),
 		color.ColoredBytes(node.value, color.Cyan, color.Blue),
 		node.nodeKey, node.leftNodeKey, node.rightNodeKey,
